@@ -31,9 +31,8 @@ class RenderCallback(BaseCallback):
         return True
 
 
-# Eğitim ortamını oluştur (render kapalı)
 env_id = "Humanoid-v4"
-env = gym.make(env_id, render_mode="human")  # render_mode=None veya varsayılan
+env = gym.make(env_id)  # render_mode=None veya varsayılan
 
 model = PPO("MlpPolicy", env, verbose=1)
 
@@ -45,14 +44,3 @@ model.learn(total_timesteps=200000, callback=render_callback)
 
 # Eğitim tamamlandıktan sonra model kaydedilebilir
 model.save("ppo_humanoid_trained")
-
-
-# import gymnasium as gym
-# from stable_baselines3 import PPO
-
-# env_id = "Humanoid-v4"
-# # Dikkat: Bu yöntem çok yavaşlatır, önerilmez
-# env = gym.make(env_id, render_mode='human') 
-
-# model = PPO("MlpPolicy", env, verbose=1)
-# model.learn(total_timesteps=10000)
