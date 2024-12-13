@@ -2,7 +2,7 @@ import gymnasium as gym
 from stable_baselines3 import PPO
 
 # Kaydedilmiş modeli yükle
-model = PPO.load("pp_humanoid_5M_steps")
+model = PPO.load("ppo_humanoid_trained_500000_complex_rewards_v002")
 
 # Ortamı başlat (render_mode='human' ile görsel çıktı alabilirsiniz)
 env_id = "Humanoid-v4"
