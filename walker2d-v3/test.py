@@ -1,42 +1,31 @@
+import os
+
 import gymnasium as gym
+import numpy as np
+from main import ComplexRewardWrapper
 from stable_baselines3 import PPO
 
-# Kaydedilmiş modeli yükle
-model = PPO.load("ppo_humanoid_trained_500000_complex_rewards_v002")
+TARGET_POSITION = np.array([5.0, 5.0])
 
-# Ortamı başlat (render_mode='human' ile görsel çıktı alabilirsiniz)
-env_id = "Humanoid-v4"
-env = gym.make(env_id, render_mode='human')
+env_id = "Humanoid-v5"
+base_env = gym.make(env_id, render_mode="human")
 
-# Ortamı resetle
-obs, info = env.reset(seed=42)
+# Modeli yükle
+model = PPO.load('./logs/best_model/best_model')
 
-done = False
-step_count = 0
-max_steps = 100000  # Kaç adım çalıştırmak istediğinizi belirleyin
+# Ortamı sarmala
+wrapped_env = ComplexRewardWrapper(
+    base_env, target_position=TARGET_POSITION, obstacles=[(3.0, 3.0), (6.0, 6.0)]
+)
 
-while not done and step_count < max_steps:
-    # Modelden eylemi tahmin et
-    action, _states = model.predict(obs, deterministic=True)
-    obs, reward, done, truncated, info = env.step(action)
-    step_count += 1
+obs, _ = wrapped_env.reset()  # İkinci dönen değeri (_info) yok say
+for _ in range(1000):
+    action, _ = model.predict(obs, deterministic=True)
+    obs, reward, done, truncated, _ = wrapped_env.step(action)
+    # wrapped_env.render()
 
-# Ortamı kapat
-env.close()
+    if done or truncated:
+        obs, _ = wrapped_env.reset()  # İkinci dönen değeri (_info) yok say
 
-# model = PPO.load(f"ppo_humanoid_trained_{MAX_STEPS}_for_testing")
-
-# print("\n--- Model Dik Durma Testi Başlıyor ---\n")
-# base_env = gym.make(env_id, render_mode="human")
-# wrapped_env = ComplexRewardWrapper(base_env, target_position=TARGET_POSITION)
-
-# obs, _ = wrapped_env.reset()
-# for step in range(1000):  # 1000 adım boyunca test
-#     action, _ = model.predict(obs, deterministic=True)
-#     obs, reward, done, truncated, info = wrapped_env.step(action)
-#     body_tilt = np.abs(obs[2])  # Eğimi kontrol ediyoruz
-#     print(f"Adım {step + 1}: Body Tilt: {body_tilt:.4f}")  # Eğim çıktısı
-#     if done:
-#         print("Model simülasyon sırasında devrildi.")
-#         break
-# print("\n--- Dik Durma Testi Tamamlandı ---\n")
+wrapped_env.close()
+base_env.close()

@@ -2,12 +2,17 @@ import os
 
 import gymnasium as gym
 import numpy as np
+import optuna
 from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import EvalCallback
+from stable_baselines3.common.monitor import Monitor
 
+# Sabitler
 MAX_STEPS = 500000
 TARGET_POSITION = np.array([5.0, 5.0])
+SAVE_DIR = "./models/"
 
-
+# Yardımcı Fonksiyonlar
 def get_latest_version(directory, max_steps):
     latest_version = 0
     pattern = f"ppo_humanoid_trained_{max_steps}_complex_rewards_v"
@@ -18,10 +23,8 @@ def get_latest_version(directory, max_steps):
                 version = int(filename.split('_v')[1].split('.')[0])
                 latest_version = max(latest_version, version)
             except ValueError:
-                print("zort")
                 continue
     return latest_version
-
 
 def generate_name(directory, max_steps):
     latest_version = get_latest_version(directory, max_steps)
@@ -30,6 +33,10 @@ def generate_name(directory, max_steps):
     name = f"ppo_humanoid_trained_{max_steps}_complex_rewards_v{next_version:03d}"
     return name
 
+def randomize_target_and_obstacles():
+    target_position = np.random.uniform(low=0.0, high=10.0, size=(2,))
+    obstacles = [np.random.uniform(low=0.0, high=10.0, size=(2,)) for _ in range(5)]
+    return target_position, obstacles
 
 class ComplexRewardWrapper(gym.Wrapper):
     def __init__(self, env, target_position=TARGET_POSITION, obstacles=None):
@@ -106,25 +113,63 @@ class ComplexRewardWrapper(gym.Wrapper):
         plt.grid()
         plt.show()
 
-
+# Ana Fonksiyon
 def main():
-    env_id = "Humanoid-v4"
+    env_id = "Humanoid-v5"
 
-    obstacles = [(3.0, 3.0), (6.0, 6.0)]
+    # Dizin oluştur
+    os.makedirs(SAVE_DIR, exist_ok=True)
+
+    # Rastgele hedef ve engeller
+    target_position, obstacles = randomize_target_and_obstacles()
+
+    # Ortamı sarmala
     base_env = gym.make(env_id)
-    wrapped_env = ComplexRewardWrapper(base_env, target_position=TARGET_POSITION, obstacles=obstacles)
+    wrapped_env = Monitor(ComplexRewardWrapper(base_env, target_position=target_position, obstacles=obstacles))
 
-    model = PPO("MlpPolicy", wrapped_env, verbose=1)
-    model_name = generate_name(directory="/Users/umuttopalak/projects/artifical-intelligence/walker2d-v3/" , max_steps=MAX_STEPS)
-    
-    model.learn(total_timesteps=MAX_STEPS)
+    # Hiperparametre optimizasyonu
+    def optimize_agent(trial):
+        learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-3, log=True)
+        gamma = trial.suggest_float("gamma", 0.8, 0.99)
+
+        model = PPO("MlpPolicy", wrapped_env, learning_rate=learning_rate, gamma=gamma, verbose=0)
+        model.learn(total_timesteps=10000)
+
+        eval_env = Monitor(ComplexRewardWrapper(base_env, target_position=target_position, obstacles=obstacles))
+        mean_reward = []
+        for _ in range(100):
+            obs = eval_env.reset()
+            _, reward, _, _, _ = eval_env.step(eval_env.action_space.sample())
+            mean_reward.append(reward)
+        return np.mean(mean_reward)
+
+    study = optuna.create_study(direction="maximize")
+    study.optimize(optimize_agent, n_trials=10)
+
+    # En iyi hiperparametreler
+    best_params = study.best_params
+    print("Best hyperparameters:", best_params)
+
+    # En iyi modelle eğitim
+    model = PPO("MlpPolicy", wrapped_env, **best_params, verbose=1)
+    model_name = generate_name(directory=SAVE_DIR, max_steps=MAX_STEPS)
+
+    # EvalCallback ekle
+    eval_callback = EvalCallback(wrapped_env, best_model_save_path='./logs/best_model',
+                                  log_path='./logs/', eval_freq=10000, deterministic=True)
+
+    # Modeli eğit
+    model.learn(total_timesteps=MAX_STEPS, callback=eval_callback)
+
+    # Eğitim sonrası sonucu görselleştir
     wrapped_env.render()
 
-    model.save(model_name)
+    # Modeli kaydet
+    model.save(os.path.join(SAVE_DIR, model_name))
+    print(f"Model saved as: {model_name}")
 
-    print(model_name)
     wrapped_env.close()
     base_env.close()
 
-
-main()
+if __name__ == "__main__":
+    main()
