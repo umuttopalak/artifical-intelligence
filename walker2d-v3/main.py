@@ -8,7 +8,7 @@ from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.monitor import Monitor
 
 # Sabitler
-MAX_STEPS = 500000
+MAX_STEPS = 1000000
 TARGET_POSITION = np.array([5.0, 5.0])
 SAVE_DIR = "./models/"
 
@@ -42,52 +42,69 @@ class ComplexRewardWrapper(gym.Wrapper):
     def __init__(self, env, target_position=TARGET_POSITION, obstacles=None):
         super().__init__(env)
         self.target_position = target_position
-        self.visited_positions = set()  # Keşif için kullanılan pozisyonlar
-        self.obstacles = obstacles if obstacles else []  # [(x1, y1), (x2, y2), ...]
+        self.visited_positions = set()
+        self.obstacles = obstacles if obstacles else []
+        self.previous_position = None
+        self.steps_upright = 0
 
     def step(self, action):
         obs, base_reward, done, truncated, info = self.env.step(action)
-
-        # Başlangıçta orijinal ödülü al
-        reward = base_reward
-
-        # 1. Hedefe Yaklaşma Ödülü
+        
+        # Temel ödülü koruyoruz ama ölçeklendiriyoruz
+        reward = base_reward * 0.1  # Temel ödülü biraz azaltıyoruz
+        
         agent_position = obs[0:2]
-        distance = np.linalg.norm(agent_position - self.target_position)
-        reward += (5.0 - distance)  # Mesafeye göre ödül
-
-        # Hedefe ulaşıldığında büyük ödül
-        if distance < 0.1:  # Hedefe çok yakın
-            reward += 10.0
-
-        # Hedefe yaklaşma ödülü
-        prev_distance = getattr(self, 'prev_distance', distance)
-        if distance < prev_distance:
-            reward += 1.0  # Hedefe yaklaşıyorsa ödül
-        self.prev_distance = distance
-
-        # 2. Enerji/Eylem Büyüklüğü Cezası
-        action_magnitude = np.sum(np.square(action))
-        reward -= 0.03 * action_magnitude  # Eylemler büyüdükçe ceza
-
-        # 3. Denge Ödülü
-        body_tilt = np.abs(obs[2])  # Eğimi kontrol ediyoruz
-        reward += max(0, 2.0 - 10 * body_tilt)
-
-        # 4. Engel Yönetimi
+        
+        # 1. Ayakta Durma ve İlerleme Ödülü
+        height = obs[0]  # Yükseklik bilgisi
+        if height > 0.8:  # Minimum yükseklik eşiği
+            self.steps_upright += 1
+            reward += 0.1  # Ayakta durma ödülü
+            
+            # İlerleme ödülü
+            if self.previous_position is not None:
+                forward_progress = agent_position[0] - self.previous_position[0]
+                if forward_progress > 0:
+                    reward += forward_progress * 0.5
+        else:
+            self.steps_upright = 0
+            reward -= 0.1  # Düşük yükseklik cezası
+            
+        self.previous_position = agent_position.copy()
+        
+        # 2. Denge Ödülü
+        body_angle = obs[2]  # Vücut açısı
+        upright_reward = np.cos(body_angle)  # -1 ile 1 arası değer
+        reward += upright_reward * 0.2
+        
+        # 3. Enerji Verimliliği
+        action_penalty = np.sum(np.square(action)) * 0.001  # Eylemlerin büyüklüğü için küçük ceza
+        reward -= action_penalty
+        
+        # 4. Hedefe Yaklaşma Ödülü (daha küçük ağırlık)
+        distance_to_target = np.linalg.norm(agent_position - self.target_position)
+        distance_reward = 1.0 / (1.0 + distance_to_target)  # 0 ile 1 arası normalize edilmiş
+        reward += distance_reward * 0.2
+        
+        # 5. Engel Yönetimi (daha yumuşak cezalar)
         for obstacle in self.obstacles:
             obstacle_distance = np.linalg.norm(agent_position - obstacle)
-            if obstacle_distance < 1.0:  # Engelle çarpışmaya çok yakın
-                reward -= 10.0  # Çarpışma cezası
-            elif obstacle_distance < 3.0:  # Engellere yakınlık için hafif ceza
-                reward -= 1.0
-
-        # 5. Keşif Ödülü
-        current_pos = tuple(agent_position.round(1))
+            if obstacle_distance < 0.5:  # Çok yakın
+                reward -= 0.5
+            elif obstacle_distance < 1.0:  # Yakın
+                reward -= 0.2
+        
+        # 6. Keşif Ödülü (daha küçük)
+        current_pos = tuple(np.round(agent_position, decimals=1))
         if current_pos not in self.visited_positions:
-            reward += 2.0  # Yeni pozisyon ödülü
+            reward += 0.1
             self.visited_positions.add(current_pos)
-
+        
+        # Erken sonlandırma
+        if height < 0.3:  # Çok düşük yükseklik
+            done = True
+            reward -= 1.0
+        
         return obs, reward, done, truncated, info
 
     def render(self, mode="human"):
@@ -144,14 +161,16 @@ def main():
         return np.mean(mean_reward)
 
     study = optuna.create_study(direction="maximize")
-    study.optimize(optimize_agent, n_trials=10)
-
-    # En iyi hiperparametreler
-    best_params = study.best_params
-    print("Best hyperparameters:", best_params)
+    study.optimize(optimize_agent, n_trials=20)  # Trial sayısı artırıldı
 
     # En iyi modelle eğitim
-    model = PPO("MlpPolicy", wrapped_env, **best_params, verbose=1)
+    model = PPO(
+        "MlpPolicy",
+        wrapped_env,
+        **study.best_params,
+        verbose=1,
+        tensorboard_log="./tensorboard_logs/"
+    )
     model_name = generate_name(directory=SAVE_DIR, max_steps=MAX_STEPS)
 
     # EvalCallback ekle
@@ -160,14 +179,15 @@ def main():
 
     # Modeli eğit
     model.learn(total_timesteps=MAX_STEPS, callback=eval_callback)
-
-    # Eğitim sonrası sonucu görselleştir
-    wrapped_env.render()
+    
 
     # Modeli kaydet
     model.save(os.path.join(SAVE_DIR, model_name))
     print(f"Model saved as: {model_name}")
 
+    # Eğitim sonrası sonucu görselleştir
+    wrapped_env.render()
+    
     wrapped_env.close()
     base_env.close()
 

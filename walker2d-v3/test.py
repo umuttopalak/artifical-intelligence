@@ -5,13 +5,13 @@ import numpy as np
 from main import ComplexRewardWrapper
 from stable_baselines3 import PPO
 
-TARGET_POSITION = np.array([5.0, 5.0])
+TARGET_POSITION = np.array([10.0, 10.0])
 
 env_id = "Humanoid-v5"
 base_env = gym.make(env_id, render_mode="human")
 
 # Modeli yükle
-model = PPO.load('./logs/best_model/best_model')
+model = PPO.load('models/ppo_humanoid_trained_1000000_complex_rewards_v001')
 
 # Ortamı sarmala
 wrapped_env = ComplexRewardWrapper(
