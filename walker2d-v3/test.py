@@ -5,7 +5,7 @@ from main import ComplexRewardWrapper, randomize_target
 from stable_baselines3 import PPO
 
 
-def test_model(model_path, num_episodes=5):
+def test_model(model_path, num_episodes=500):
     # Ortamı oluştur
     env_id = "Humanoid-v5"
     base_env = gym.make(env_id, render_mode="human")
@@ -34,6 +34,6 @@ def test_model(model_path, num_episodes=5):
 
 if __name__ == "__main__":
     # En iyi modeli test et
-    MODEL_PATH = "/Users/umuttopalak/projects/artifical-intelligence/models/ppo_humanoid_trained_5000000_complex_rewards_v001"
+    MODEL_PATH = "/Users/umuttopalak/projects/artifical-intelligence/models/ppo_humanoid_trained_1000000_complex_rewards_v003"
     print(MODEL_PATH)
     test_model(MODEL_PATH)
